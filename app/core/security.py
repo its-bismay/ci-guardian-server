@@ -2,7 +2,7 @@ import jwt
 import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
-from fastapi import Request, HTTPException, status
+from fastapi import HTTPException, status
 from .config import settings
 
 
@@ -22,18 +22,6 @@ def decode_jwt(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-
-def get_token_from_cookie(request: Request) -> str | None:
-    return request.cookies.get("session")
-
-
-async def get_current_user_id(request: Request) -> str:
-    token = get_token_from_cookie(request)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    payload = decode_jwt(token)
-    return payload["user_id"]
 
 
 def verify_webhook_signature(payload_body: bytes, signature_header: str) -> bool:

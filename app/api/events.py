@@ -1,8 +1,8 @@
 import asyncio
 import json
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
-from ..core.security import get_token_from_cookie, decode_jwt
+from ..core.security import decode_jwt
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -19,14 +19,14 @@ def push_event(user_id: str, event: dict):
 
 
 @router.get("/runs")
-async def sse_runs(request: Request):
-    token = get_token_from_cookie(request)
-    if not token:
+async def sse_runs(token: str = Query(...)):
+    try:
+        payload = decode_jwt(token)
+    except Exception as e:
         from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
-    payload = decode_jwt(token)
-    user_id = payload["user_id"]
+        return JSONResponse(status_code=401, content={"detail": str(e)})
 
+    user_id = payload["user_id"]
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     user_queues.setdefault(user_id, []).append(queue)
 

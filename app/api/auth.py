@@ -1,32 +1,13 @@
-from fastapi import APIRouter, HTTPException, status, Request
+from fastapi import APIRouter, HTTPException, status, Request, Header
 from fastapi.responses import RedirectResponse, JSONResponse
-from authlib.integrations.starlette_client import OAuth
-from starlette.config import Config as StarletteConfig
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import settings
 from ..core.security import create_jwt, decode_jwt
-from ..core.deps import get_optional_user
 from ..db.session import get_session
 from ..models import User
-from fastapi import Depends
 import httpx
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-starlette_config = StarletteConfig(environ={
-    "GITHUB_CLIENT_ID": settings.github_client_id,
-    "GITHUB_CLIENT_SECRET": settings.github_client_secret,
-})
-oauth = OAuth(starlette_config)
-oauth.register(
-    name="github",
-    authorize_url="https://github.com/login/oauth/authorize",
-    authorize_params={"scope": "user:email"},
-    access_token_url="https://github.com/login/oauth/access_token",
-    access_token_params=None,
-    client_kwargs={"scope": "user:email"},
-)
 
 
 @router.get("/github/login")
@@ -36,7 +17,7 @@ async def github_login():
 
 
 @router.get("/github/callback")
-async def github_callback(code: str, request: Request):
+async def github_callback(code: str):
     async with httpx.AsyncClient() as client:
         token_res = await client.post(
             "https://github.com/login/oauth/access_token",
@@ -76,32 +57,24 @@ async def github_callback(code: str, request: Request):
             await session.refresh(user)
 
         jwt_token = create_jwt({"user_id": user.id})
-        response = RedirectResponse(url=f"{settings.frontend_url}/dashboard")
-        response.set_cookie(
-            key="session",
-            value=jwt_token,
-            httponly=True,
-            secure=settings.environment == "production",
-            samesite="lax",
-            max_age=settings.jwt_expire_minutes * 60,
-        )
-        return response
+        return RedirectResponse(url=f"{settings.frontend_url}/auth/callback?token={jwt_token}")
 
 
 @router.post("/logout")
 async def logout():
-    response = JSONResponse({"ok": True})
-    response.delete_cookie("session", path="/")
-    return response
+    return JSONResponse({"ok": True})
 
 
 @router.get("/me")
-async def get_me(request: Request):
-    user_data = await get_optional_user(request)
-    if not user_data:
+async def get_me(request: Request, authorization: str = Header(None)):
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    payload = decode_jwt(token)
     async for session in get_session():
-        user = await session.get(User, user_data["user_id"])
+        user = await session.get(User, payload["user_id"])
         if not user:
             raise HTTPException(status_code=401)
         return {
