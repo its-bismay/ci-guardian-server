@@ -52,20 +52,57 @@ async def installation_callback(
         await session.commit()
         await session.refresh(inst)
 
-        repos = await get_installation_repos(installation_id)
+        sync_error = None
+        try:
+            repos = await get_installation_repos(installation_id)
+            for r in repos:
+                repo_exists = await session.execute(
+                    select(Repo).where(Repo.github_repo_id == r["id"])
+                )
+                if not repo_exists.scalar_one_or_none():
+                    session.add(Repo(
+                        installation_id=inst.id,
+                        github_repo_id=r["id"],
+                        full_name=r["full_name"],
+                    ))
+            await session.commit()
+        except Exception as e:
+            sync_error = str(e)
+
+        if sync_error:
+            return RedirectResponse(url=f"{settings.frontend_url}/onboarding?installed=1&sync_error=1")
+
+    return RedirectResponse(url=f"{settings.frontend_url}/onboarding?installed=1")
+
+
+@router.post("/repos/sync")
+async def sync_repos(
+    user=Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Installation).where(Installation.user_id == user.id)
+    )
+    inst = result.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="No GitHub App installation found")
+
+    try:
+        repos = await get_installation_repos(inst.github_installation_id)
         for r in repos:
-            repo_exists = await session.execute(
+            existing = await session.execute(
                 select(Repo).where(Repo.github_repo_id == r["id"])
             )
-            if not repo_exists.scalar_one_or_none():
+            if not existing.scalar_one_or_none():
                 session.add(Repo(
                     installation_id=inst.id,
                     github_repo_id=r["id"],
                     full_name=r["full_name"],
                 ))
         await session.commit()
-
-    return RedirectResponse(url=f"{settings.frontend_url}/onboarding?installed=1")
+        return {"ok": True, "count": len(repos)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to sync repos: {str(e)}")
 
 
 @router.get("/repos", response_model=list[RepoOut])
