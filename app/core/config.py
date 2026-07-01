@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "cohere/north-mini-code:free"
     telegram_bot_token: str = ""
-    telegram_bot_username: str = "ci_guardian_bot"
+    telegram_bot_username: str = "bibhabasu_ci_guardiant_bot"
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
