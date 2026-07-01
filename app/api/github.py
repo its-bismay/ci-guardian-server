@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..core.config import settings
 from ..core.deps import get_current_user
+from ..core.security import create_jwt, decode_jwt
 from ..models import User, Installation, Repo
 from ..schemas import RepoOut, ToggleRepoIn
 from ..db.session import get_session
@@ -12,8 +14,9 @@ router = APIRouter(prefix="/github", tags=["github"])
 
 
 @router.get("/install-url")
-async def get_install_url():
-    url = f"https://github.com/apps/{settings.github_app_name}/installations/new"
+async def get_install_url(user=Depends(get_current_user)):
+    token = create_jwt({"user_id": user.id, "purpose": "install_callback"})
+    url = f"https://github.com/apps/{settings.github_app_name}/installations/new?state={token}"
     return {"url": url}
 
 
@@ -21,19 +24,33 @@ async def get_install_url():
 async def installation_callback(
     installation_id: int,
     setup_action: str = "install",
-    user=Depends(get_current_user),
+    state: str = None,
     session: AsyncSession = Depends(get_session),
 ):
+    user_id = None
+    if state:
+        try:
+            payload = decode_jwt(state)
+            if payload.get("purpose") == "install_callback":
+                user_id = payload.get("user_id")
+        except Exception:
+            pass
+
+    if not user_id:
+        return RedirectResponse(url=f"{settings.frontend_url}/onboarding?error=auth_required")
+
     existing = await session.execute(
         select(Installation).where(Installation.github_installation_id == installation_id)
     )
-    if not existing.scalar_one_or_none():
+    inst = existing.scalar_one_or_none()
+    if not inst:
         inst = Installation(
-            user_id=user.id,
+            user_id=user_id,
             github_installation_id=installation_id,
         )
         session.add(inst)
         await session.commit()
+        await session.refresh(inst)
 
         repos = await get_installation_repos(installation_id)
         for r in repos:
@@ -48,7 +65,7 @@ async def installation_callback(
                 ))
         await session.commit()
 
-    return {"ok": True, "installation_id": installation_id}
+    return RedirectResponse(url=f"{settings.frontend_url}/onboarding?installed=1")
 
 
 @router.get("/repos", response_model=list[RepoOut])
