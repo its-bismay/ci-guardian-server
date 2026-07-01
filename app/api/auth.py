@@ -44,13 +44,15 @@ async def github_callback(code: str, request: Request):
                 "client_id": settings.github_client_id,
                 "client_secret": settings.github_client_secret,
                 "code": code,
+                "redirect_uri": f"{settings.app_url}/auth/github/callback",
             },
             headers={"Accept": "application/json"},
         )
         token_data = token_res.json()
         access_token = token_data.get("access_token")
         if not access_token:
-            raise HTTPException(status_code=400, detail="GitHub OAuth failed")
+            detail = token_data.get("error_description", token_data.get("error", "GitHub OAuth failed"))
+            raise HTTPException(status_code=400, detail=detail)
 
         user_res = await client.get(
             "https://api.github.com/user",
