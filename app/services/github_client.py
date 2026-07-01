@@ -42,9 +42,31 @@ async def github_request(method: str, path: str, token: str, **kwargs):
 
 async def get_installation_repos(installation_id: int) -> list[dict]:
     token = await get_installation_token(installation_id)
-    res = await github_request("GET", "/installation/repositories", token)
-    data = res.json()
-    return data.get("repositories", [])
+    all_repos = []
+    url = "/installation/repositories?per_page=100"
+
+    async with httpx.AsyncClient() as client:
+        while url:
+            res = await client.request(
+                "GET",
+                f"https://api.github.com{url}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github.v3+json",
+                },
+            )
+            data = res.json()
+            all_repos.extend(data.get("repositories", []))
+
+            url = None
+            link_header = res.headers.get("link", "")
+            if link_header:
+                for part in link_header.split(","):
+                    if 'rel="next"' in part:
+                        url = part.split(";")[0].strip().strip("<>")
+                        url = url.replace("https://api.github.com", "")
+
+    return all_repos
 
 
 async def fetch_run_metadata(owner: str, repo: str, run_id: int, token: str) -> dict:
